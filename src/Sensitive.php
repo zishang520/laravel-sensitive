@@ -2,54 +2,59 @@
 
 namespace Sydante\LaravelSensitive;
 
-use Generator;
+use Illuminate\Support\Str;
 use Sydante\LaravelSensitive\Exceptions\CacheException;
 use Sydante\LaravelSensitive\Exceptions\FileReadException;
 
 /**
- * 敏感词检查及过滤扩展包，采用 DFA 算法
+ * 敏感词检查及过滤扩展包，采用 DFA 算法.
  *
  * @package Sydante\LaravelSensitive
  */
 class Sensitive
 {
     /**
-     * 替换字符串
+     * 正则匹配：中日韩文、拉丁字母、数字.
+     */
+    private const REGEXP = '/[^\x{4E00}-\x{9FA5}\x{F900}-\x{FA2D}\x{0030}-\x{0039}\x{0041}-\x{005a}\x{0061}-\x{007a}]/u';
+
+    /**
+     * 替换字符串.
      *
      * @var string
      */
     private $replaceCode = '*';
 
     /**
-     * 敏感词库集合
+     * 敏感词库集合.
      *
      * @var array
      */
     private $trieTreeMap = [];
 
     /**
-     * 干扰因子集合
+     * 干扰因子集合.
      *
-     * @var array
+     * @var iterable
      */
     private $disturbList = [];
 
     /**
-     * 配置
+     * 配置.
      *
      * @var array|null
      */
     private $config;
 
     /**
-     * 是否使用缓存
+     * 是否使用缓存.
      *
      * @var bool
      */
     private $useCache;
 
     /**
-     * 缓存类
+     * 缓存类.
      *
      * @var SensitiveCacheInterface
      */
@@ -57,8 +62,6 @@ class Sensitive
 
     /**
      * Sensitive constructor.
-     *
-     * @param array|null $config
      *
      * @throws FileReadException
      * @throws CacheException
@@ -99,23 +102,16 @@ class Sensitive
                     return;
                 }
             } else {
-                throw new CacheException(
-                    'cache not implement SensitiveCacheInterface'
-                );
+                throw new CacheException('cache not implement SensitiveCacheInterface');
             }
         }
 
         // 没缓存就加载配置中的敏感词设置，并在使用缓存时更新缓存
-        $this->resetTrieTreeMap()
-            ->saveTrieTreeMap();
+        $this->resetTrieTreeMap()->saveTrieTreeMap();
     }
 
     /**
-     * 设置替换字符串
-     *
-     * @param string $replaceCode
-     *
-     * @return Sensitive
+     * 设置替换字符串.
      */
     public function setReplaceCode(string $replaceCode): self
     {
@@ -125,13 +121,9 @@ class Sensitive
     }
 
     /**
-     * 设置干扰因子
-     *
-     * @param array $disturbList
-     *
-     * @return Sensitive
+     * 设置干扰因子.
      */
-    public function setDisturbs(array $disturbList = []): self
+    public function setDisturbs(iterable $disturbList = []): self
     {
         $this->disturbList = $disturbList;
 
@@ -139,7 +131,7 @@ class Sensitive
     }
 
     /**
-     * 如果使用缓存的话，保存当前敏感词库集合到缓存中
+     * 如果使用缓存的话，保存当前敏感词库集合到缓存中.
      *
      * @throws CacheException
      */
@@ -157,9 +149,8 @@ class Sensitive
     }
 
     /**
-     * 使用配置中的设置重置当前的敏感词库集合
+     * 使用配置中的设置重置当前的敏感词库集合.
      *
-     * @return Sensitive
      * @throws FileReadException
      */
     public function resetTrieTreeMap(): Sensitive
@@ -180,7 +171,7 @@ class Sensitive
     }
 
     /**
-     * 清空敏感词库集合
+     * 清空敏感词库集合.
      */
     public function emptyTrieTreeMap(): Sensitive
     {
@@ -190,9 +181,8 @@ class Sensitive
     }
 
     /**
-     * 清理敏感词库集合缓存
+     * 清理敏感词库集合缓存.
      *
-     * @return bool
      * @throws CacheException
      */
     public function clearCache(): bool
@@ -209,13 +199,9 @@ class Sensitive
     }
 
     /**
-     * 添加敏感词
-     *
-     * @param array $wordsList
-     *
-     * @return Sensitive
+     * 添加敏感词.
      */
-    public function addWords(array $wordsList): Sensitive
+    public function addWords(iterable $wordsList): Sensitive
     {
         foreach ($wordsList as $words) {
             $this->addToTree($words);
@@ -225,38 +211,8 @@ class Sensitive
     }
 
     /**
-     * 将敏感词加入敏感词库集合中
+     * 从文件中读取并添加敏感词.
      *
-     * @param string $words
-     */
-    private function addToTree(string $words): void
-    {
-        $words = trim($words, " \t\n\r\0\x0B'\"`");
-
-        if (!$words) {
-            return;
-        }
-
-        $nowWords = &$this->trieTreeMap;
-
-        $len = mb_strlen($words);
-        for ($i = 0; $i < $len; $i++) {
-            $word = mb_substr($words, $i, 1);
-
-            if (!isset($nowWords[$word])) {
-                $nowWords[$word] = false;
-            }
-
-            $nowWords = &$nowWords[$word];
-        }
-    }
-
-    /**
-     * 从文件中读取并添加敏感词
-     *
-     * @param string $filename
-     *
-     * @return Sensitive
      * @throws FileReadException
      */
     public function addWordsFromFile(string $filename): Sensitive
@@ -269,22 +225,199 @@ class Sensitive
     }
 
     /**
-     * 使用生成器方式读取文件
+     * 过滤敏感词.
+     */
+    public function filter(string $text): string
+    {
+        $wordsList = $this->search($text, true);
+
+        if (!$wordsList->valid() || is_null($wordsList->key())) {
+            return $text;
+        }
+
+        return strtr($text, iterator_to_array($wordsList));
+    }
+
+    /**
+     * 查找对应敏感词.
+     */
+    public function search(string $text, bool $hasReplace = false): \Generator
+    {
+        $textLength = mb_strlen($text, 'utf-8');
+        for ($i = 0; $i < $textLength; ++$i) {
+            $wordLength = 0;
+            $trieTree = &$this->trieTreeMap;
+            $beginIndex = $i;
+            $replace_str = '';
+            $is_conjunction = false;
+            for ($index = $beginIndex; $index < $textLength; ++$index) {
+                $original_word = mb_substr($text, $index, 1, 'utf-8');
+                $word = Transform::BIG5_GB2312[$original_word] ?? $original_word; // 转为简体
+
+                if (!isset($trieTree[$word])) {
+                    // 判断已经有匹配词汇了
+                    if ($wordLength > 0) {
+                        // 连词搜索
+                        if (!$is_conjunction && ($word !== '+') && isset($trieTree['+'])) {
+                            $is_conjunction = true;
+                            $conjunction = $this->searchConjunction($text, $trieTree['+'], $index, $textLength, $hasReplace);
+                            if ($conjunction->valid() && !is_null($conjunction->key())) {
+                                if ($hasReplace) {
+                                    yield mb_substr($text, $i, $wordLength, 'utf-8') => $replace_str;
+                                } else {
+                                    yield mb_substr($text, $i, $wordLength, 'utf-8');
+                                }
+                                foreach ($conjunction as $key => $value) {
+                                    if ($hasReplace) {
+                                        yield $key => $value;
+                                    } else {
+                                        yield $value;
+                                    }
+                                }
+                            }
+                        }
+                        if ($this->isDisturb($word)) {
+                            ++$wordLength;
+                            $replace_str .= $word;
+                            continue;
+                        }
+                    }
+                    break;
+                }
+
+                ++$wordLength;
+
+                if ($trieTree[$word] !== false) {
+                    $trieTree = &$trieTree[$word];
+                    $replace_str .= $this->replaceCode;
+                } else {
+                    $i += $wordLength - 1;
+                    $replace_str .= $this->replaceCode; // 最后的一个字符替换
+                    if ($hasReplace) {
+                        yield mb_substr($text, $beginIndex, $wordLength, 'utf-8') => $replace_str;
+                    } else {
+                        yield mb_substr($text, $beginIndex, $wordLength, 'utf-8');
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * 判断是否存在敏感词.
+     * @copyright (c) zishang520 All Rights Reserved
+     */
+    public function check(string $text): bool
+    {
+        $wordsList = $this->search($text);
+
+        if (!$wordsList->valid() || is_null($wordsList->key())) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 连词搜索.
+     * @copyright (c) zishang520 All Rights Reserved
+     */
+    protected function searchConjunction(string &$text, array &$trieTreeMap, int $startIndex, int $textLength, bool $hasReplace = false): \Generator
+    {
+        for ($i = $startIndex; $i < $textLength; ++$i) {
+            $wordLength = 0;
+            $trieTree = &$trieTreeMap;
+            $beginIndex = $i;
+            $replace_str = '';
+            $is_conjunction = false;
+            for ($index = $beginIndex; $index < $textLength; ++$index) {
+                $original_word = mb_substr($text, $index, 1, 'utf-8');
+                $word = Transform::BIG5_GB2312[$original_word] ?? $original_word; // 转为简体
+
+                if (!isset($trieTree[$word])) {
+                    // 判断已经有匹配词汇了
+                    if ($wordLength > 0) {
+                        // 连词搜索
+                        if (!$is_conjunction && ($word !== '+') && isset($trieTree['+'])) {
+                            $is_conjunction = true;
+                            $conjunction = $this->searchConjunction($text, $trieTree['+'], $index, $textLength, $hasReplace);
+                            if ($conjunction->valid() && !is_null($conjunction->key())) {
+                                if ($hasReplace) {
+                                    yield mb_substr($text, $i, $wordLength, 'utf-8') => $replace_str;
+                                } else {
+                                    yield mb_substr($text, $i, $wordLength, 'utf-8');
+                                }
+                                foreach ($conjunction as $key => $value) {
+                                    if ($hasReplace) {
+                                        yield $key => $value;
+                                    } else {
+                                        yield $value;
+                                    }
+                                }
+                            }
+                        }
+                        if ($this->isDisturb($word)) {
+                            ++$wordLength;
+                            $replace_str .= $word;
+                            continue;
+                        }
+                    }
+                    break;
+                }
+
+                ++$wordLength;
+
+                if ($trieTree[$word] !== false) {
+                    $trieTree = &$trieTree[$word];
+                    $replace_str .= $this->replaceCode;
+                } else {
+                    $i += $wordLength - 1;
+                    $replace_str .= $this->replaceCode; // 最后的一个字符替换
+                    if ($hasReplace) {
+                        yield mb_substr($text, $beginIndex, $wordLength, 'utf-8') => $replace_str;
+                    } else {
+                        yield mb_substr($text, $beginIndex, $wordLength, 'utf-8');
+                    }
+                    break 2; // 结束跳出本次的连词搜索
+                }
+            }
+        }
+    }
+
+    /**
+     * 将敏感词加入敏感词库集合中.
+     */
+    private function addToTree(string $words): void
+    {
+        $words = str_replace([' ', "\t", "\0", "\x0B"], '', trim($words, " \t\n\r\0\x0B'\"`"));
+
+        if ($words === '' || $words[0] === '#') {
+            return;
+        }
+
+        $nowWords = &$this->trieTreeMap;
+
+        foreach ($this->makeIterator($words) as $word) {
+            if (!isset($nowWords[$word])) {
+                $nowWords[$word] = false;
+            }
+
+            $nowWords = &$nowWords[$word];
+        }
+    }
+
+    /**
+     * 使用生成器方式读取文件.
      *
-     * @param $filename
-     *
-     * @return Generator
      * @throws FileReadException
      */
-    private function getWordsFromFile(string $filename): Generator
+    private function getWordsFromFile(string $filename): \Generator
     {
         if (!file_exists($filename)) {
             throw new FileReadException("file [{$filename}] not exists");
         }
 
-        $handle = fopen($filename, 'rb');
-
-        if (!$handle) {
+        if (!($handle = fopen($filename, 'rb'))) {
             throw new FileReadException('read file failed');
         }
 
@@ -296,109 +429,19 @@ class Sensitive
     }
 
     /**
-     * 过滤敏感词
-     *
-     * @param string $text
-     *
-     * @return string
-     */
-    public function filter(string $text): string
-    {
-        $replaceCodeList = [];
-        $wordsList = $this->search($text, true, $replaceCodeList);
-
-        if (empty($wordsList)) {
-            return $text;
-        }
-
-        return str_replace($wordsList, $replaceCodeList, $text);
-    }
-
-    /**
-     * 查找对应敏感词
-     *
-     * @param string $text
-     * @param bool   $hasReplace
-     * @param array  $replaceCodeList
-     *
-     * @return array
-     */
-    public function search(
-        string $text,
-        bool $hasReplace = false,
-        array &$replaceCodeList = []
-    ): array {
-        $wordsList = [];
-        $textLength = mb_strlen($text);
-
-        for ($i = 0; $i < $textLength; $i++) {
-            $wordLength = $this->checkWord($text, $i, $textLength);
-
-            if ($wordLength > 0) {
-                $words = mb_substr($text, $i, $wordLength);
-                $wordsList[] = $words;
-
-                if ($hasReplace) {
-                    $replaceCodeList[] = str_repeat($this->replaceCode, mb_strlen($words));
-                }
-
-                $i += $wordLength - 1;
-            }
-        }
-
-        return $wordsList;
-    }
-
-    /**
-     * 敏感词检测
-     *
-     * @param string $text
-     * @param int    $beginIndex
-     * @param int    $length
-     *
-     * @return int
-     */
-    private function checkWord(string $text, int $beginIndex, int $length): int
-    {
-        $flag = false;
-        $wordLength = 0;
-        $trieTree = &$this->trieTreeMap;
-
-        for ($i = $beginIndex; $i < $length; $i++) {
-            $word = mb_substr($text, $i, 1);
-
-            if ($this->isDisturb($word)) {
-                $wordLength++;
-                continue;
-            }
-
-            if (!isset($trieTree[$word])) {
-                break;
-            }
-
-            $wordLength++;
-
-            if ($trieTree[$word] !== false) {
-                $trieTree = &$trieTree[$word];
-            } else {
-                $flag = true;
-            }
-        }
-
-        $flag || $wordLength = 0;
-
-        return $wordLength;
-    }
-
-    /**
-     * 是否为干扰因子
-     *
-     * @param string $word
-     *
-     * @return bool
+     * 是否为干扰因子.
      */
     private function isDisturb(string $word): bool
     {
-        return in_array($word, $this->disturbList, true);
+        return preg_match(self::REGEXP, $word) || Str::contains($word, $this->disturbList);
+    }
+
+    /**
+     * 生成器.
+     * @copyright (c) zishang520 All Rights Reserved
+     */
+    private function makeIterator(string $str): \Generator
+    {
+        yield from mb_str_split($str, 1, 'utf-8');
     }
 }

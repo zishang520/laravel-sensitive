@@ -25,9 +25,6 @@ class ClearCache extends Command
     /**
      * Execute the console command.
      *
-     * @param Sensitive $sensitive
-     *
-     * @return void
      * @throws CacheException
      */
     public function handle(Sensitive $sensitive): void

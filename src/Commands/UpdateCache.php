@@ -26,9 +26,6 @@ class UpdateCache extends Command
     /**
      * Execute the console command.
      *
-     * @param Sensitive $sensitive
-     *
-     * @return void
      * @throws CacheException
      * @throws FileReadException
      */
